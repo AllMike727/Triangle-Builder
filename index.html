@@ -1,0 +1,741 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A touch-friendly triangle-building activity.">
+  <title>Triangle Builder</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: ui-rounded, "Avenir Next", Avenir, "Segoe UI", system-ui, sans-serif;
+      background: #ffffff;
+      color: #17324d;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; background: #ffffff; }
+    button { font: inherit; }
+
+    .triangle-builder {
+      width: min(100%, 980px);
+      margin: 0 auto;
+      padding: clamp(14px, 3vw, 30px);
+    }
+
+    .activity-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+
+    h1 { margin: 0; font-size: clamp(1.35rem, 3vw, 2rem); font-weight: 700; letter-spacing: -0.025em; }
+    .instruction { margin: 5px 0 0; color: #526a80; font-size: clamp(.9rem, 2vw, 1rem); }
+
+    .new-challenge {
+      appearance: none;
+      min-height: 44px;
+      padding: 10px 16px;
+      border: 0;
+      border-radius: 10px;
+      background: #1769aa;
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      box-shadow: 0 2px 0 #0e4e81;
+    }
+    .new-challenge:hover { background: #0f5b97; }
+    .new-challenge:active { transform: translateY(1px); box-shadow: 0 1px 0 #0e4e81; }
+    .new-challenge:focus-visible { outline: 3px solid #f0a500; outline-offset: 3px; }
+
+    .stage {
+      position: relative;
+      overflow: hidden;
+      border: 2px solid #d8e4ed;
+      border-radius: 18px;
+      background: #ffffff;
+      transition: background-color 420ms ease, border-color 420ms ease;
+    }
+    .stage.is-complete { background: #ecf8e7; border-color: #9ecb8e; }
+    .board {
+      display: block;
+      width: 100%;
+      height: auto;
+      aspect-ratio: 1000 / 660;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .segment-line { stroke: #1769aa; stroke-width: 8; stroke-linecap: round; pointer-events: none; }
+    .segment-hit { stroke: transparent; stroke-width: 54; stroke-linecap: round; cursor: grab; }
+    .stage.is-dragging .segment-hit, .stage.is-dragging .endpoint-hit { cursor: grabbing; }
+    .length-label {
+      fill: #17324d;
+      font-size: 24px;
+      font-weight: 700;
+      text-anchor: middle;
+      dominant-baseline: middle;
+      paint-order: stroke;
+      stroke: #ffffff;
+      stroke-width: 12px;
+      stroke-linejoin: round;
+      pointer-events: none;
+    }
+    .joined-label { fill: #0d5d42; }
+    .endpoint-hit { fill: transparent; cursor: grab; }
+    .vertex-core {
+      fill: #ffffff;
+      stroke: #1769aa;
+      stroke-width: 4;
+      pointer-events: none;
+      transform-box: fill-box;
+      transform-origin: center;
+    }
+    .vertex.joined .vertex-core { fill: #0d7a58; stroke: #ffffff; stroke-width: 5; }
+    .vertex.joined .vertex-inner { display: block; }
+    .vertex-inner { display: none; fill: #ffffff; pointer-events: none; }
+    .vertex.is-snap-candidate .vertex-core, .vertex.is-snapping .vertex-core {
+      fill: #f7b733;
+      stroke: #b45d00;
+      animation: vertex-pulse 650ms ease-in-out infinite;
+    }
+    .vertex.just-snapped .vertex-core { animation: snap-pop 500ms ease-out; }
+    .snap-guide { stroke: #e58700; stroke-width: 4; stroke-dasharray: 8 8; stroke-linecap: round; pointer-events: none; animation: dash-march .5s linear infinite; }
+
+    .confetti { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    .win-message {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: min(88%, 550px);
+      padding: 18px 22px;
+      border-radius: 17px;
+      background: rgba(255, 255, 255, .94);
+      color: #126343;
+      text-align: center;
+      font-size: clamp(1.25rem, 3.4vw, 2rem);
+      font-weight: 800;
+      line-height: 1.2;
+      box-shadow: 0 8px 28px rgba(25, 92, 56, .18);
+      transform: translate(-50%, -50%) scale(.75);
+      opacity: 0;
+      pointer-events: none;
+    }
+    .win-message.show { animation: message-in 560ms cubic-bezier(.18, .89, .32, 1.28) forwards; }
+    .sr-status { min-height: 1.2em; margin: 11px 3px 0; color: #526a80; font-size: .92rem; }
+
+    @keyframes vertex-pulse { 50% { transform: scale(1.34); } }
+    @keyframes snap-pop { 0% { transform: scale(.7); } 55% { transform: scale(1.6); } 100% { transform: scale(1); } }
+    @keyframes dash-march { to { stroke-dashoffset: -16; } }
+    @keyframes message-in { to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+    @media (max-width: 640px) {
+      .activity-header { align-items: flex-start; flex-direction: column; }
+      .new-challenge { width: 100%; }
+      .stage { border-radius: 14px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="triangle-builder">
+    <div class="activity-header">
+      <div>
+        <h1>Build a triangle</h1>
+        <p class="instruction">Drag a line to slide it. Drag a loose dot to pivot it. Touch two loose dots together to join them. Double-click or double-tap a joined dot to separate it.</p>
+      </div>
+      <button class="new-challenge" id="newChallenge" type="button">Try another one.</button>
+    </div>
+
+    <section class="stage" id="stage" aria-label="Triangle construction board">
+      <svg class="board" id="board" viewBox="0 0 1000 660" role="application" aria-describedby="status" aria-label="Three labeled line segments. Drag endpoints together to create a triangle.">
+        <g id="segmentLayer"></g>
+        <g id="guideLayer"></g>
+        <g id="vertexLayer"></g>
+      </svg>
+      <canvas class="confetti" id="confetti" aria-hidden="true"></canvas>
+      <div class="win-message" id="winMessage" role="status" aria-live="polite" hidden>Congratulations: You made a triangle!</div>
+    </section>
+    <p class="sr-status" id="status" aria-live="polite">A new triangle challenge is ready.</p>
+  </main>
+
+  <script>
+    (() => {
+      const NS = 'http://www.w3.org/2000/svg';
+      const WIDTH = 1000;
+      const UNIT_SCALE = 29;
+      const board = document.getElementById('board');
+      const stage = document.getElementById('stage');
+      const segmentLayer = document.getElementById('segmentLayer');
+      const guideLayer = document.getElementById('guideLayer');
+      const vertexLayer = document.getElementById('vertexLayer');
+      const status = document.getElementById('status');
+      const newChallenge = document.getElementById('newChallenge');
+      const winMessage = document.getElementById('winMessage');
+      const canvas = document.getElementById('confetti');
+      const ctx = canvas.getContext('2d');
+
+      let segments = [];
+      let joins = new Map();
+      let drag = null;
+      let snapCandidate = null;
+      let lastSnap = null;
+      let won = false;
+      let confettiFrame = null;
+      let confettiPieces = [];
+      let lastVertexTap = null;
+      let challengeQueue = [];
+      let lastChallengeType = null;
+
+      const id = (segmentIndex, endIndex) => `${segmentIndex}:${endIndex}`;
+      const parseId = (key) => key.split(':').map(Number);
+      const otherEnd = (key) => { const [s, e] = parseId(key); return id(s, e === 0 ? 1 : 0); };
+      const pointFor = (key) => { const [s, e] = parseId(key); return segments[s].p[e]; };
+      const setPoint = (key, point) => { const [s, e] = parseId(key); segments[s].p[e] = { x: point.x, y: point.y }; };
+      const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+      const make = (tag, attributes = {}) => {
+        const node = document.createElementNS(NS, tag);
+        Object.entries(attributes).forEach(([name, value]) => node.setAttribute(name, value));
+        return node;
+      };
+      const randomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+      const randomFrom = (values) => values[Math.floor(Math.random() * values.length)];
+
+      function newLengths(shouldMakeTriangle, usedSets) {
+        let lengths;
+        do {
+          lengths = [randomInt(3, 10), randomInt(3, 10), randomInt(3, 10)];
+          const setKey = [...lengths].sort((a, b) => a - b).join(':');
+          if (canMakeTriangle(lengths) === shouldMakeTriangle && new Set(lengths).size > 1 && !usedSets.has(setKey)) {
+            usedSets.add(setKey);
+            return lengths;
+          }
+        } while (true);
+      }
+
+      function shuffle(values) {
+        for (let index = values.length - 1; index > 0; index -= 1) {
+          const swapIndex = randomInt(0, index);
+          [values[index], values[swapIndex]] = [values[swapIndex], values[index]];
+        }
+        return values;
+      }
+
+      function makeChallengeBatch() {
+        const usedSets = new Set();
+        const batch = [
+          ...Array.from({ length: 3 }, () => newLengths(true, usedSets)),
+          ...Array.from({ length: 2 }, () => newLengths(false, usedSets))
+        ];
+        shuffle(batch);
+
+        // Keep a new batch from extending a long same-type streak across the boundary.
+        if (lastChallengeType !== null && canMakeTriangle(batch[0]) === lastChallengeType) {
+          const swapIndex = batch.findIndex((lengths, index) => index > 0 && canMakeTriangle(lengths) !== lastChallengeType);
+          [batch[0], batch[swapIndex]] = [batch[swapIndex], batch[0]];
+        }
+        return batch;
+      }
+
+      function nextChallengeLengths() {
+        if (challengeQueue.length === 0) challengeQueue = makeChallengeBatch();
+        const lengths = challengeQueue.shift();
+        lastChallengeType = canMakeTriangle(lengths);
+        return lengths;
+      }
+
+      function canMakeTriangle(lengths = segments.map((segment) => segment.length)) {
+        const ordered = [...lengths].sort((a, b) => a - b);
+        return ordered[0] + ordered[1] > ordered[2];
+      }
+
+      function segmentAt(centerX, centerY, length, angle) {
+        const radians = angle * Math.PI / 180;
+        const half = length * UNIT_SCALE / 2;
+        const dx = Math.cos(radians) * half;
+        const dy = Math.sin(radians) * half;
+        return { length, p: [{ x: centerX - dx, y: centerY - dy }, { x: centerX + dx, y: centerY + dy }] };
+      }
+
+      function generateChallenge() {
+        const lengths = nextChallengeLengths();
+        segments = [
+          segmentAt(255, 175, lengths[0], randomFrom([-22, -12, 0, 12, 23])),
+          segmentAt(750, 220, lengths[1], randomFrom([145, 157, 170, 183, 195])),
+          segmentAt(500, 495, lengths[2], randomFrom([248, 260, 273, 286, 298]))
+        ];
+        joins = new Map();
+        drag = null;
+        snapCandidate = null;
+        lastSnap = null;
+        lastVertexTap = null;
+        won = false;
+        stage.classList.remove('is-complete', 'is-dragging');
+        winMessage.hidden = true;
+        winMessage.classList.remove('show');
+        stopConfetti();
+        status.textContent = 'A new triangle challenge is ready.';
+        render();
+      }
+
+      function connectedSegments(start) {
+        const connected = new Set([start]);
+        let changed = true;
+        while (changed) {
+          changed = false;
+          joins.forEach((partner, key) => {
+            const [fromSegment] = parseId(key);
+            const [toSegment] = parseId(partner);
+            if (connected.has(fromSegment) && !connected.has(toSegment)) { connected.add(toSegment); changed = true; }
+          });
+        }
+        return connected;
+      }
+
+      function snapshotSegmentPositions(indices) {
+        const snapshot = new Map();
+        indices.forEach((index) => {
+          snapshot.set(id(index, 0), { ...segments[index].p[0] });
+          snapshot.set(id(index, 1), { ...segments[index].p[1] });
+        });
+        return snapshot;
+      }
+
+      function translateSnapshot(snapshot, dx, dy) {
+        snapshot.forEach((point, key) => setPoint(key, { x: point.x + dx, y: point.y + dy }));
+      }
+
+      function endpointGroups() {
+        const groups = [];
+        const visited = new Set();
+        segments.forEach((segment, segmentIndex) => {
+          [0, 1].forEach((endIndex) => {
+            const key = id(segmentIndex, endIndex);
+            if (visited.has(key)) return;
+            const partner = joins.get(key);
+            const members = partner ? [key, partner] : [key];
+            members.forEach((member) => visited.add(member));
+            groups.push({ key, members, point: pointFor(key) });
+          });
+        });
+        return groups;
+      }
+
+      function alreadyLinked(segmentA, segmentB) {
+        for (const [first, second] of joins.entries()) {
+          const [a] = parseId(first);
+          const [b] = parseId(second);
+          if ((a === segmentA && b === segmentB) || (a === segmentB && b === segmentA)) return true;
+        }
+        return false;
+      }
+
+      function findSnapCandidate(draggedKey) {
+        const [draggedSegment] = parseId(draggedKey);
+        const current = pointFor(draggedKey);
+        const connected = connectedSegments(draggedSegment);
+        const snapDistance = Math.max(27, 34 * WIDTH / board.getBoundingClientRect().width);
+        let closest = null;
+        endpointGroups().forEach((group) => {
+          const [candidateSegment] = parseId(group.key);
+          if (group.members.length !== 1 || group.key === draggedKey || candidateSegment === draggedSegment) return;
+          if (alreadyLinked(draggedSegment, candidateSegment)) return;
+          if (connected.has(candidateSegment) && (connected.size !== segments.length || !canMakeTriangle())) return;
+          const candidateDistance = distance(current, group.point);
+          if (candidateDistance <= snapDistance && (!closest || candidateDistance < closest.distance)) {
+            closest = { key: group.key, distance: candidateDistance };
+          }
+        });
+        return closest;
+      }
+
+      function findTranslationSnapCandidate(component) {
+        const snapDistance = Math.max(27, 34 * WIDTH / board.getBoundingClientRect().width);
+        const looseMovingEndpoints = endpointGroups().filter((group) => {
+          const [segmentIndex] = parseId(group.key);
+          return group.members.length === 1 && component.has(segmentIndex);
+        });
+        const looseOutsideEndpoints = endpointGroups().filter((group) => {
+          const [segmentIndex] = parseId(group.key);
+          return group.members.length === 1 && !component.has(segmentIndex);
+        });
+        let closest = null;
+        looseMovingEndpoints.forEach((source) => {
+          const [sourceSegment] = parseId(source.key);
+          looseOutsideEndpoints.forEach((target) => {
+            const [targetSegment] = parseId(target.key);
+            if (alreadyLinked(sourceSegment, targetSegment)) return;
+            const candidateDistance = distance(source.point, target.point);
+            if (candidateDistance <= snapDistance && (!closest || candidateDistance < closest.distance)) {
+              closest = { first: source.key, key: target.key, distance: candidateDistance };
+            }
+          });
+        });
+        return closest;
+      }
+
+      function render() {
+        segmentLayer.replaceChildren();
+        guideLayer.replaceChildren();
+        vertexLayer.replaceChildren();
+
+        segments.forEach((segment, index) => {
+          const [a, b] = segment.p;
+          const group = make('g', { class: 'segment' });
+          const hit = make('line', { class: 'segment-hit', 'data-action': 'segment', 'data-segment': index, x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+          const line = make('line', { class: 'segment-line', x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+          const middleX = (a.x + b.x) / 2;
+          const middleY = (a.y + b.y) / 2;
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const length = Math.hypot(dx, dy) || 1;
+          const normal = { x: -dy / length, y: dx / length };
+          const label = make('text', {
+            class: `length-label${joins.has(id(index, 0)) || joins.has(id(index, 1)) ? ' joined-label' : ''}`,
+            x: middleX + normal.x * 23,
+            y: middleY + normal.y * 23
+          });
+          label.textContent = `${segment.length} units`;
+          group.append(hit, line, label);
+          segmentLayer.append(group);
+        });
+
+        if (drag && snapCandidate) {
+          const snapSource = drag.mode === 'vertex' ? drag.key : snapCandidate.first;
+          const guide = make('line', {
+            class: 'snap-guide', x1: pointFor(snapSource).x, y1: pointFor(snapSource).y,
+            x2: pointFor(snapCandidate.key).x, y2: pointFor(snapCandidate.key).y
+          });
+          guideLayer.append(guide);
+        }
+
+        endpointGroups().forEach((group) => {
+          const paired = group.members.length === 2;
+          const isCandidate = snapCandidate && snapCandidate.key === group.key;
+          const isDragged = drag && ((drag.mode === 'vertex' && drag.key === group.key) || (drag.mode === 'translate' && snapCandidate && snapCandidate.first === group.key));
+          const isJustSnapped = lastSnap && lastSnap.until > performance.now() && lastSnap.keys.includes(group.key);
+          const vertex = make('g', {
+            class: `vertex${paired ? ' joined' : ''}${isCandidate ? ' is-snap-candidate' : ''}${isDragged && snapCandidate ? ' is-snapping' : ''}${isJustSnapped ? ' just-snapped' : ''}`,
+            'data-action': 'vertex', 'data-key': group.key
+          });
+          const hit = make('circle', { class: 'endpoint-hit', cx: group.point.x, cy: group.point.y, r: 30 });
+          const core = make('circle', { class: 'vertex-core', cx: group.point.x, cy: group.point.y, r: paired ? 12 : 9 });
+          const inner = make('circle', { class: 'vertex-inner', cx: group.point.x, cy: group.point.y, r: 3 });
+          vertex.append(hit, core, inner);
+          vertexLayer.append(vertex);
+        });
+      }
+
+      function svgPoint(event) {
+        const rect = board.getBoundingClientRect();
+        return { x: (event.clientX - rect.left) * WIDTH / rect.width, y: (event.clientY - rect.top) * 660 / rect.height };
+      }
+
+      function beginDrag(event) {
+        if (won || event.button !== undefined && event.button !== 0) return;
+        const action = event.target.closest('[data-action]');
+        if (!action) return;
+        event.preventDefault();
+        const pointer = svgPoint(event);
+        const kind = action.dataset.action;
+        if (kind === 'segment') {
+          const segmentIndex = Number(action.dataset.segment);
+          const component = connectedSegments(segmentIndex);
+          drag = { mode: 'translate', pointerId: event.pointerId, start: pointer, component, positions: snapshotSegmentPositions(component) };
+          status.textContent = 'Moving the line segment.';
+        } else {
+          const key = action.dataset.key;
+          const [segmentIndex] = parseId(key);
+          if (joins.has(key)) {
+            const component = connectedSegments(segmentIndex);
+            drag = { mode: 'translate', pointerId: event.pointerId, start: pointer, component, originKey: key, positions: snapshotSegmentPositions(component) };
+            status.textContent = 'Moving the joined line segments together.';
+          } else {
+            const fixedKey = otherEnd(key);
+            const fixedPoint = { ...pointFor(fixedKey) };
+            const originalPoint = pointFor(key);
+            drag = { mode: 'vertex', pointerId: event.pointerId, key, fixedPoint, startPoint: { ...originalPoint }, radius: distance(originalPoint, fixedPoint) };
+            status.textContent = 'Turning one line segment around its other endpoint.';
+          }
+        }
+        board.setPointerCapture(event.pointerId);
+        stage.classList.add('is-dragging');
+        render();
+      }
+
+      function moveDrag(event) {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        event.preventDefault();
+        updateDrag(svgPoint(event));
+        render();
+      }
+
+      function updateDrag(pointer) {
+        if (drag.mode === 'translate') {
+          translateSnapshot(drag.positions, pointer.x - drag.start.x, pointer.y - drag.start.y);
+          const nextCandidate = findTranslationSnapCandidate(drag.component);
+          if (!snapCandidate && nextCandidate) status.textContent = 'Release to snap the highlighted vertices together.';
+          snapCandidate = nextCandidate;
+        } else {
+          const dx = pointer.x - drag.fixedPoint.x;
+          const dy = pointer.y - drag.fixedPoint.y;
+          const radius = Math.hypot(dx, dy) || 1;
+          setPoint(drag.key, {
+            x: drag.fixedPoint.x + dx * drag.radius / radius,
+            y: drag.fixedPoint.y + dy * drag.radius / radius
+          });
+          snapCandidate = findSnapCandidate(drag.key);
+        }
+      }
+
+      function finishDrag(event) {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        const completedDrag = drag;
+        const releasePoint = svgPoint(event);
+        if (event.type !== 'lostpointercapture') updateDrag(releasePoint);
+        const candidateAtRelease = snapCandidate;
+        if ((event.type === 'pointercancel' || event.type === 'lostpointercapture') && !candidateAtRelease) {
+          cancelDrag(event);
+          return;
+        }
+        if (completedDrag.mode === 'vertex' && candidateAtRelease) snapVertices(completedDrag.key, candidateAtRelease.key);
+        if (completedDrag.mode === 'translate' && candidateAtRelease) snapVertices(candidateAtRelease.first, candidateAtRelease.key);
+        drag = null;
+        snapCandidate = null;
+        stage.classList.remove('is-dragging');
+        if (event.pointerId !== undefined && board.hasPointerCapture(event.pointerId)) board.releasePointerCapture(event.pointerId);
+        if (event.type === 'pointerup' && completedDrag.originKey && !candidateAtRelease && distance(completedDrag.start, releasePoint) < 10) {
+          handleVertexTap(completedDrag.originKey, releasePoint);
+        }
+        render();
+      }
+
+      function cancelDrag(event) {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        if (drag.mode === 'translate') {
+          translateSnapshot(drag.positions, 0, 0);
+        } else {
+          setPoint(drag.key, drag.startPoint);
+        }
+        drag = null;
+        snapCandidate = null;
+        stage.classList.remove('is-dragging');
+        if (board.hasPointerCapture(event.pointerId)) board.releasePointerCapture(event.pointerId);
+        status.textContent = 'Drag canceled. The pieces returned to where they started.';
+        render();
+      }
+
+      function handleVertexTap(key, point) {
+        const now = performance.now();
+        if (lastVertexTap && lastVertexTap.key === key && now - lastVertexTap.time < 600 && distance(point, lastVertexTap.point) < 28) {
+          lastVertexTap = null;
+          separateVertices(key);
+        } else {
+          lastVertexTap = { key, point, time: now };
+        }
+      }
+
+      function separateVertices(key) {
+        const partner = joins.get(key);
+        if (!partner) return;
+        joins.delete(key);
+        joins.delete(partner);
+        const [partnerSegment] = parseId(partner);
+        const anchor = pointFor(otherEnd(partner));
+        const joinedPoint = pointFor(partner);
+        const radius = distance(joinedPoint, anchor) || segments[partnerSegment].length * UNIT_SCALE;
+        const originalAngle = Math.atan2(joinedPoint.y - anchor.y, joinedPoint.x - anchor.x);
+        const turn = partnerSegment % 2 === 0 ? .48 : -.48;
+        setPoint(partner, {
+          x: anchor.x + Math.cos(originalAngle + turn) * radius,
+          y: anchor.y + Math.sin(originalAngle + turn) * radius
+        });
+        lastSnap = null;
+        lastVertexTap = null;
+        if (won) {
+          won = false;
+          stage.classList.remove('is-complete');
+          winMessage.hidden = true;
+          winMessage.classList.remove('show');
+          stopConfetti();
+        }
+        status.textContent = 'The joined vertices are separated.';
+        render();
+      }
+
+      function breakSnapWithDoubleClick(event) {
+        const action = event.target.closest('[data-action="vertex"]');
+        if (!action || !joins.has(action.dataset.key)) return;
+        event.preventDefault();
+        separateVertices(action.dataset.key);
+      }
+
+      function endpointPath(first, second) {
+        const path = [];
+        const visited = new Set();
+        let entryKey = first;
+        while (path.length < segments.length) {
+          const [segmentIndex] = parseId(entryKey);
+          if (visited.has(segmentIndex)) return null;
+          visited.add(segmentIndex);
+          const exitKey = otherEnd(entryKey);
+          path.push({ segmentIndex, startKey: entryKey, endKey: exitKey });
+          if (exitKey === second) return path;
+          const partner = joins.get(exitKey);
+          if (!partner) return null;
+          entryKey = partner;
+        }
+        return null;
+      }
+
+      function closeTrianglePreservingLengths(first, second) {
+        const path = endpointPath(first, second);
+        if (!path || path.length !== 3) return false;
+
+        const baseStart = pointFor(path[1].startKey);
+        const baseEnd = pointFor(path[1].endKey);
+        const baseLength = distance(baseStart, baseEnd);
+        if (baseLength === 0) return false;
+
+        const firstLength = segments[path[0].segmentIndex].length * UNIT_SCALE;
+        const lastLength = segments[path[2].segmentIndex].length * UNIT_SCALE;
+        const along = (firstLength * firstLength - lastLength * lastLength + baseLength * baseLength) / (2 * baseLength);
+        const heightSquared = firstLength * firstLength - along * along;
+        if (heightSquared < -1e-6) return false;
+
+        const height = Math.sqrt(Math.max(0, heightSquared));
+        const unitX = (baseEnd.x - baseStart.x) / baseLength;
+        const unitY = (baseEnd.y - baseStart.y) / baseLength;
+        const midpoint = {
+          x: (pointFor(first).x + pointFor(second).x) / 2,
+          y: (pointFor(first).y + pointFor(second).y) / 2
+        };
+        const intersections = [1, -1].map((side) => ({
+          x: baseStart.x + unitX * along - unitY * height * side,
+          y: baseStart.y + unitY * along + unitX * height * side
+        }));
+        const target = distance(intersections[0], midpoint) <= distance(intersections[1], midpoint)
+          ? intersections[0]
+          : intersections[1];
+
+        // Pivot the two outer segments around their existing joints to close the triangle.
+        setPoint(first, target);
+        setPoint(second, target);
+        return true;
+      }
+
+      function snapVertices(first, second) {
+        const [firstSegment] = parseId(first);
+        const [secondSegment] = parseId(second);
+        if (connectedSegments(firstSegment).has(secondSegment)) {
+          if (!canMakeTriangle()) {
+            status.textContent = 'These segments do not close into a triangle.';
+            return;
+          }
+          if (!closeTrianglePreservingLengths(first, second)) {
+            status.textContent = 'These segments cannot be aligned without changing their lengths.';
+            return;
+          }
+        } else {
+          // Move the untouched component to the dragged endpoint so labeled side lengths stay exact.
+          const target = pointFor(second);
+          const source = pointFor(first);
+          const targetComponent = connectedSegments(secondSegment);
+          translateSnapshot(snapshotSegmentPositions(targetComponent), source.x - target.x, source.y - target.y);
+        }
+        joins.set(first, second);
+        joins.set(second, first);
+        lastVertexTap = null;
+        lastSnap = { keys: [first, second], until: performance.now() + 540 };
+        status.textContent = 'Vertices snapped together.';
+        setTimeout(() => { if (lastSnap && lastSnap.until <= performance.now()) { lastSnap = null; render(); } }, 560);
+        if (madeTriangle()) celebrate();
+      }
+
+      function madeTriangle() {
+        if (!canMakeTriangle()) return false;
+        if (joins.size !== 6) return false;
+        if (!segments.every((segment, segmentIndex) => joins.has(id(segmentIndex, 0)) && joins.has(id(segmentIndex, 1)))) return false;
+        return connectedSegments(0).size === 3;
+      }
+
+      function resizeCanvas() {
+        const rect = canvas.getBoundingClientRect();
+        const ratio = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.max(1, Math.floor(rect.width * ratio));
+        canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      }
+
+      function stopConfetti() {
+        if (confettiFrame) cancelAnimationFrame(confettiFrame);
+        confettiFrame = null;
+        confettiPieces = [];
+        ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+      }
+
+      function launchConfetti() {
+        resizeCanvas();
+        const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const colors = ['#1769aa', '#f7b733', '#0d7a58', '#e65858', '#8d59bb'];
+        const total = reducedMotion ? 28 : 120;
+        const centerX = canvas.clientWidth / 2;
+        const centerY = canvas.clientHeight * .42;
+        confettiPieces = Array.from({ length: total }, () => ({
+          x: centerX + (Math.random() - .5) * 80,
+          y: centerY + (Math.random() - .5) * 20,
+          vx: (Math.random() - .5) * (reducedMotion ? 2 : 8),
+          vy: -Math.random() * (reducedMotion ? 1 : 8) - 2,
+          gravity: reducedMotion ? .04 : .16,
+          size: 5 + Math.random() * 7,
+          rotation: Math.random() * Math.PI,
+          spin: (Math.random() - .5) * .28,
+          color: randomFrom(colors),
+          life: reducedMotion ? 22 : 80 + Math.random() * 50
+        }));
+        const draw = () => {
+          ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+          confettiPieces.forEach((piece) => {
+            piece.x += piece.vx; piece.y += piece.vy; piece.vy += piece.gravity; piece.rotation += piece.spin; piece.life -= 1;
+            ctx.save();
+            ctx.translate(piece.x, piece.y);
+            ctx.rotate(piece.rotation);
+            ctx.fillStyle = piece.color;
+            ctx.fillRect(-piece.size / 2, -piece.size / 3, piece.size, piece.size * .66);
+            ctx.restore();
+          });
+          confettiPieces = confettiPieces.filter((piece) => piece.life > 0 && piece.y < canvas.clientHeight + 40);
+          if (confettiPieces.length) confettiFrame = requestAnimationFrame(draw);
+          else confettiFrame = null;
+        };
+        draw();
+      }
+
+      function celebrate() {
+        if (won) return;
+        won = true;
+        stage.classList.add('is-complete');
+        winMessage.hidden = false;
+        requestAnimationFrame(() => winMessage.classList.add('show'));
+        status.textContent = 'Congratulations: You made a triangle!';
+        launchConfetti();
+      }
+
+      board.addEventListener('pointerdown', beginDrag);
+      board.addEventListener('pointermove', moveDrag);
+      board.addEventListener('pointerup', finishDrag);
+      board.addEventListener('pointercancel', finishDrag);
+      board.addEventListener('lostpointercapture', finishDrag);
+      board.addEventListener('dblclick', breakSnapWithDoubleClick);
+      newChallenge.addEventListener('click', generateChallenge);
+      new ResizeObserver(resizeCanvas).observe(canvas);
+      generateChallenge();
+    })();
+  </script>
+</body>
+</html>
